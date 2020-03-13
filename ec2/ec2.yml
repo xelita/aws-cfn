@@ -1,0 +1,101 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description:
+  "A stack for creating an ec2 instance.
+   This instance is deployed into one public subnet of a VPC composed of two public subnets.
+   There is only one security group attached to this EC2 instance to allow SSH communication on port 22."
+
+
+Mappings:
+  # Subnet configuration with CIDR to be used
+  SubnetConfig:
+    VPC:
+      CIDR: "10.0.0.0/16"
+    PublicOne:
+      CIDR: "10.0.0.0/24"
+    PublicTwo:
+      CIDR: "10.0.1.0/24"
+
+Parameters:
+  # KeyName used to connect to the EC2 instance (SSH connection)
+  KeyName:
+    Type: String
+    Default: aws-paris
+    Description: The key name to use for SSH connection
+
+Resources:
+  # Creating the VPC with its to public subnets
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      CidrBlock: !FindInMap ["SubnetConfig", "VPC", "CIDR"]
+  PublicSubnetOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs { Ref: "AWS::Region" }]
+      VpcId: !Ref "VPC"
+      CidrBlock: !FindInMap ["SubnetConfig", "PublicOne", "CIDR"]
+      MapPublicIpOnLaunch: true
+  PublicSubnetTwo:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs { Ref: "AWS::Region" }]
+      VpcId: !Ref "VPC"
+      CidrBlock: !FindInMap ["SubnetConfig", "PublicTwo", "CIDR"]
+      MapPublicIpOnLaunch: true
+
+  # Making public subnets accessible from the Internet
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+  GatewayAttachement:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref "VPC"
+      InternetGatewayId: !Ref "InternetGateway"
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref "VPC"
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachement
+    Properties:
+      RouteTableId: !Ref "PublicRouteTable"
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref "InternetGateway"
+  PublicSubnetOneRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetOne
+      RouteTableId: !Ref PublicRouteTable
+  PublicSubnetTwoRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetTwo
+      RouteTableId: !Ref PublicRouteTable
+
+  # EC2 instance
+  Ec2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-07eda9385feb1e969
+      InstanceType: t3a.nano
+      KeyName: !Ref KeyName
+      SubnetId: !Ref PublicSubnetOne
+      SecurityGroupIds:
+        - !GetAtt Ec2SecurityGroup.GroupId
+  Ec2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Access to the EC2 instance
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+        - CidrIpv6: ::/0
+          IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22          
+      VpcId: !Ref "VPC"      
